@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Emotion</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * { 
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        body {
+            background: #000;
+        }
+        @keyframes breathe {
+            0%, 100% { transform: scale(1); opacity: 0.6; }
+            50% { transform: scale(1.15); opacity: 0.3; }
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(1); opacity: 0.8; }
+            100% { transform: scale(2); opacity: 0; }
+        }
+        @keyframes gradient-shift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .recording-active {
+            background: #ff3b30 !important;
+        }
+        .recording-active::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid #ff3b30;
+            animation: pulse-ring 1.5s ease-out infinite;
+        }
+        .glass {
+            background: rgba(28, 28, 30, 0.72);
+            backdrop-filter: saturate(180%) blur(20px);
+            -webkit-backdrop-filter: saturate(180%) blur(20px);
+        }
+        .card {
+            background: rgba(28, 28, 30, 0.6);
+            border: 0.5px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+        }
+        .card-elevated {
+            background: rgba(44, 44, 46, 0.8);
+            border: 0.5px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+        .segmented-control {
+            background: rgba(118, 118, 128, 0.12);
+            border-radius: 8px;
+            padding: 2px;
+        }
+        .segment {
+            padding: 5px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.6);
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+        .segment:hover {
+            color: rgba(255, 255, 255, 0.8);
+        }
+        .segment.active {
+            background: rgba(99, 99, 102, 0.48);
+            color: #fff;
+        }
+        .btn-record {
+            background: linear-gradient(180deg, #0a84ff 0%, #0066cc 100%);
+            box-shadow: 0 4px 16px rgba(10, 132, 255, 0.4), inset 0 1px 0 rgba(255,255,255,0.2);
+            transition: all 0.2s ease;
+        }
+        .btn-record:hover {
+            transform: scale(1.04);
+            box-shadow: 0 6px 24px rgba(10, 132, 255, 0.5), inset 0 1px 0 rgba(255,255,255,0.2);
+        }
+        .btn-record:active {
+            transform: scale(0.96);
+        }
+        /* Emotion Ring */
+        .emotion-ring {
+            position: relative;
+            width: 200px;
+            height: 200px;
+        }
+        .emotion-ring-bg {
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            background: conic-gradient(from 0deg, 
+                rgba(255, 59, 48, 0.3) 0deg,
+                rgba(255, 149, 0, 0.3) 45deg,
+                rgba(255, 204, 0, 0.3) 90deg,
+                rgba(52, 199, 89, 0.3) 135deg,
+                rgba(0, 199, 190, 0.3) 180deg,
+                rgba(48, 176, 199, 0.3) 225deg,
+                rgba(50, 173, 230, 0.3) 270deg,
+                rgba(175, 82, 222, 0.3) 315deg,
+                rgba(255, 59, 48, 0.3) 360deg
+            );
+            animation: breathe 4s ease-in-out infinite;
+        }
+        .emotion-ring-inner {
+            position: absolute;
+            inset: 12px;
+            border-radius: 50%;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        /* Trend Chart */
+        .trend-chart {
+            height: 120px;
+            position: relative;
+            overflow: hidden;
+        }
+        .trend-line {
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            fill: none;
+            stroke-width: 2.5;
+        }
+        .trend-area {
+            fill: url(#areaGradient);
+            opacity: 0.3;
+        }
+        .trend-dot {
+            fill: #0a84ff;
+            filter: drop-shadow(0 0 4px rgba(10, 132, 255, 0.6));
+        }
+        /* Emotion Bar */
+        .emotion-bar {
+            height: 6px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            overflow: hidden;
+        }
+        .emotion-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        /* Stats Ring */
+        .stat-ring {
+            width: 64px;
+            height: 64px;
+        }
+        .stat-ring-bg {
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.1);
+            stroke-width: 6;
+        }
+        .stat-ring-fill {
+            fill: none;
+            stroke-width: 6;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.8s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen text-white">
+    
+    <div class="max-w-2xl mx-auto px-5 py-6 pb-28">
+        
+        <!-- Compact Header -->
+        <header class="flex items-center justify-between mb-6">
+            <div>
+                <h1 class="text-[22px] font-semibold tracking-tight text-white">Voice Emotion</h1>
+                <p class="text-[13px] text-[#8e8e93]">Real-time emotion analysis</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="llm-badge" class="hidden text-[11px] text-[#30d158] bg-[#30d158]/10 px-2.5 py-1 rounded-full font-medium">
+                    <i class="fas fa-sparkles mr-1"></i>AI
+                </span>
+                <div id="status-indicator" class="flex items-center gap-1.5 bg-[#1c1c1e] px-2.5 py-1 rounded-full">
+                    <span id="status-dot" class="w-1.5 h-1.5 bg-[#30d158] rounded-full"></span>
+                    <span id="status-text" class="text-[11px] text-[#8e8e93]">Ready</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Controls Row -->
+        <div class="flex flex-wrap gap-3 mb-6">
+            <div class="segmented-control flex">
+                <button class="segment active" data-mode="single">Single</button>
+                <button class="segment" data-mode="stream">Live</button>
+            </div>
+            <div class="segmented-control flex">
+                <button class="segment active" data-model="cnn">CNN</button>
+                <button class="segment" data-model="cnn_lstm">Hybrid</button>
+                <button class="segment" data-model="lstm">LSTM</button>
+            </div>
+            <!-- Language Selector -->
+            <div class="segmented-control flex" id="lang-selector">
+                <button class="segment active" data-lang="en" title="English">🇺🇸</button>
+                <button class="segment" data-lang="es" title="Español">🇪🇸</button>
+                <button class="segment" data-lang="fr" title="Français">🇫🇷</button>
+                <button class="segment" data-lang="de" title="Deutsch">🇩🇪</button>
+                <button class="segment" data-lang="zh" title="中文">🇨🇳</button>
+                <button class="segment" data-lang="ja" title="日本語">🇯🇵</button>
+                <button class="segment" data-lang="hi" title="हिन्दी">🇮🇳</button>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="grid gap-4 mb-6">
+            
+            <!-- Emotion Display Card -->
+            <div class="card-elevated p-6">
+                <div class="flex items-center gap-6">
+                    <!-- Emotion Ring -->
+                    <div class="emotion-ring flex-shrink-0">
+                        <div class="emotion-ring-bg" id="emotion-ring-bg"></div>
+                        <div class="emotion-ring-inner">
+                            <span id="emotion-icon" class="text-[56px] leading-none mb-1">🎙️</span>
+                            <span id="confidence-text" class="text-[13px] text-[#8e8e93] hidden">--%</span>
+                        </div>
+                    </div>
+                    <!-- Emotion Info -->
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[11px] text-[#8e8e93] uppercase tracking-wider mb-1">Current Emotion</p>
+                        <h2 id="emotion-label" class="text-[28px] font-semibold text-white capitalize truncate">Ready</h2>
+                        <!-- Live Indicator -->
+                        <div id="live-indicator" class="hidden mt-2">
+                            <div class="flex items-center gap-2">
+                                <span class="w-2 h-2 bg-[#ff3b30] rounded-full animate-pulse"></span>
+                                <span class="text-[13px] text-[#ff3b30] font-medium">LIVE</span>
+                                <span id="detection-count" class="text-[13px] text-[#8e8e93]">• 0 detections</span>
+                            </div>
+                        </div>
+                        <!-- Record Button (inline) -->
+                        <button id="record-btn" class="btn-record relative w-12 h-12 rounded-full flex items-center justify-center mt-4">
+                            <i id="record-icon" class="fas fa-microphone text-[18px] text-white"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Emotion Trend Chart (visible in stream mode) -->
+            <div id="trend-section" class="card p-4 hidden">
+                <div class="flex items-center justify-between mb-3">
+                    <p class="text-[13px] text-[#8e8e93] font-medium">EMOTION TREND</p>
+                    <p class="text-[11px] text-[#636366]">Last 20 detections</p>
+                </div>
+                <div class="trend-chart">
+                    <svg id="trend-svg" width="100%" height="100%" preserveAspectRatio="none">
+                        <defs>
+                            <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" style="stop-color:#0a84ff;stop-opacity:0.4" />
+                                <stop offset="100%" style="stop-color:#0a84ff;stop-opacity:0" />
+                            </linearGradient>
+                            <linearGradient id="lineGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                                <stop offset="0%" style="stop-color:#5e5ce6" />
+                                <stop offset="100%" style="stop-color:#0a84ff" />
+                            </linearGradient>
+                        </defs>
+                        <path id="trend-area" class="trend-area"></path>
+                        <path id="trend-line" class="trend-line" stroke="url(#lineGradient)"></path>
+                        <circle id="trend-dot" class="trend-dot" r="5" cx="0" cy="0" style="display:none"></circle>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Emotion Breakdown (visible after streaming) -->
+            <div id="breakdown-section" class="card p-4 hidden">
+                <p class="text-[13px] text-[#8e8e93] font-medium mb-4">EMOTION BREAKDOWN</p>
+                <div id="breakdown-bars" class="space-y-3"></div>
+            </div>
+
+            <!-- Stats Row (visible after streaming) -->
+            <div id="stats-section" class="hidden grid grid-cols-3 gap-3">
+                <div class="card p-4 text-center">
+                    <svg class="stat-ring mx-auto mb-2" viewBox="0 0 64 64">
+                        <circle class="stat-ring-bg" cx="32" cy="32" r="26"></circle>
+                        <circle id="stat-confidence-ring" class="stat-ring-fill" cx="32" cy="32" r="26" 
+                            stroke="#30d158" stroke-dasharray="163.36" stroke-dashoffset="163.36"
+                            transform="rotate(-90 32 32)"></circle>
+                    </svg>
+                    <p id="stat-confidence" class="text-[20px] font-semibold text-white">--%</p>
+                    <p class="text-[11px] text-[#8e8e93]">Avg Confidence</p>
+                </div>
+                <div class="card p-4 text-center">
+                    <svg class="stat-ring mx-auto mb-2" viewBox="0 0 64 64">
+                        <circle class="stat-ring-bg" cx="32" cy="32" r="26"></circle>
+                        <circle id="stat-detections-ring" class="stat-ring-fill" cx="32" cy="32" r="26" 
+                            stroke="#0a84ff" stroke-dasharray="163.36" stroke-dashoffset="163.36"
+                            transform="rotate(-90 32 32)"></circle>
+                    </svg>
+                    <p id="stat-detections" class="text-[20px] font-semibold text-white">0</p>
+                    <p class="text-[11px] text-[#8e8e93]">Detections</p>
+                </div>
+                <div class="card p-4 text-center">
+                    <svg class="stat-ring mx-auto mb-2" viewBox="0 0 64 64">
+                        <circle class="stat-ring-bg" cx="32" cy="32" r="26"></circle>
+                        <circle id="stat-dominant-ring" class="stat-ring-fill" cx="32" cy="32" r="26" 
+                            stroke="#ff9f0a" stroke-dasharray="163.36" stroke-dashoffset="163.36"
+                            transform="rotate(-90 32 32)"></circle>
+                    </svg>
+                    <p id="stat-dominant" class="text-[20px] font-semibold text-white">😐</p>
+                    <p class="text-[11px] text-[#8e8e93]">Dominant</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Results (Single Mode) -->
+        <div id="results" class="hidden space-y-3 mb-6">
+            <div class="card p-4">
+                <p class="text-[11px] text-[#8e8e93] uppercase tracking-wider mb-1">What you said</p>
+                <p id="transcription" class="text-[15px] text-white leading-relaxed">"..."</p>
+            </div>
+            <div class="card p-4" style="background: linear-gradient(135deg, rgba(10, 132, 255, 0.1) 0%, rgba(94, 92, 230, 0.1) 100%);">
+                <div class="flex items-center gap-2 mb-1">
+                    <p class="text-[11px] text-[#0a84ff] uppercase tracking-wider">Response</p>
+                    <span id="llm-indicator" class="hidden text-[10px] text-[#30d158]">• Gemini</span>
+                </div>
+                <p id="response" class="text-[15px] text-white leading-relaxed"></p>
+            </div>
+        </div>
+
+        <!-- Emotion History Timeline -->
+        <div id="history-section" class="hidden">
+            <div class="flex items-center justify-between mb-3">
+                <p class="text-[11px] text-[#8e8e93] uppercase tracking-wider">Recent</p>
+                <button id="download-report-btn" class="hidden text-[11px] text-[#0a84ff] hover:text-[#5ac8fa] transition-colors flex items-center gap-1">
+                    <i class="fas fa-file-pdf"></i> Download Report
+                </button>
+            </div>
+            <div id="history-container" class="flex gap-2 overflow-x-auto pb-2 -mx-1 px-1"></div>
+        </div>
+
+    </div>
+
+    <!-- Instruction Toast -->
+    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 glass px-4 py-2 rounded-full">
+        <p id="instruction-text" class="text-[13px] text-[#8e8e93]">Tap mic to start</p>
+    </div>
+
+    <script>
+        const emotionEmojis = {
+            'neutral': '😐', 'calm': '😌', 'happy': '😊', 'sad': '😢',
+            'angry': '😠', 'fearful': '😨', 'disgust': '🤢', 'surprised': '😲'
+        };
+        
+        const emotionColors = {
+            'neutral': '#8e8e93', 'calm': '#5ac8fa', 'happy': '#ffcc00', 'sad': '#5856d6',
+            'angry': '#ff3b30', 'fearful': '#af52de', 'disgust': '#34c759', 'surprised': '#ff9500'
+        };
+        
+        // Emotion to confidence value mapping for trend chart
+        const emotionValues = {
+            'happy': 1, 'surprised': 0.85, 'calm': 0.7, 'neutral': 0.5,
+            'sad': 0.35, 'fearful': 0.25, 'angry': 0.15, 'disgust': 0.05
+        };
+
+        let mediaRecorder, audioChunks = [], isRecording = false, emotionHistory = [], currentModel = 'cnn';
+        let currentMode = 'single';
+        let currentLanguage = 'en';
+        let socket = null;
+        let audioContext = null;
+        let audioProcessor = null;
+        let mediaStream = null;
+        let detectionCount = 0;
+        let trendData = []; // For trend chart
+        let emotionCounts = {}; // For breakdown
+        let totalConfidence = 0;
+        
+        const recordBtn = document.getElementById('record-btn');
+        const recordIcon = document.getElementById('record-icon');
+        const statusText = document.getElementById('status-text');
+        const statusDot = document.getElementById('status-dot');
+        const instructionText = document.getElementById('instruction-text');
+        const resultsDiv = document.getElementById('results');
+        const modelSegments = document.querySelectorAll('[data-model]');
+        const modeSegments = document.querySelectorAll('[data-mode]');
+        const langSegments = document.querySelectorAll('[data-lang]');
+        const liveIndicator = document.getElementById('live-indicator');
+        const detectionCountEl = document.getElementById('detection-count');
+        const trendSection = document.getElementById('trend-section');
+        const breakdownSection = document.getElementById('breakdown-section');
+        const statsSection = document.getElementById('stats-section');
+
+        // Initialize Socket.IO
+        function initSocket() {
+            if (socket) return;
+            socket = io();
+            
+            socket.on('connect', () => console.log('Socket connected'));
+            
+            socket.on('emotion_update', (data) => {
+                detectionCount++;
+                detectionCountEl.textContent = `• ${detectionCount} detections`;
+                totalConfidence += data.confidence;
+                
+                // Update counts
+                emotionCounts[data.emotion] = (emotionCounts[data.emotion] || 0) + 1;
+                
+                // Update trend data
+                trendData.push({ emotion: data.emotion, confidence: data.confidence, time: Date.now() });
+                if (trendData.length > 20) trendData.shift();
+                
+                updateEmotionDisplay(data.emotion, data.confidence);
+                updateTrendChart();
+                addToHistory({ emotion: data.emotion, confidence: data.confidence });
+            });
+            
+            socket.on('streaming_complete', (data) => {
+                statusText.textContent = 'Ready';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#30d158] rounded-full';
+                
+                if (data.total_detections > 0) {
+                    showStreamingSummary(data);
+                }
+            });
+            
+            socket.on('error', (data) => console.error('Socket error:', data));
+        }
+
+        // Mode Toggle
+        modeSegments.forEach(seg => {
+            seg.addEventListener('click', () => {
+                const mode = seg.dataset.mode;
+                if (!mode || mode === currentMode) return;
+                
+                modeSegments.forEach(s => s.classList.remove('active'));
+                seg.classList.add('active');
+                currentMode = mode;
+                
+                if (mode === 'stream') {
+                    initSocket();
+                    instructionText.textContent = 'Tap mic for live analysis';
+                    resultsDiv.classList.add('hidden');
+                    trendSection.classList.remove('hidden');
+                } else {
+                    instructionText.textContent = 'Tap mic to start';
+                    trendSection.classList.add('hidden');
+                    breakdownSection.classList.add('hidden');
+                    statsSection.classList.add('hidden');
+                }
+                
+                liveIndicator.classList.add('hidden');
+            });
+        });
+
+        // Language Selector
+        langSegments.forEach(seg => {
+            seg.addEventListener('click', () => {
+                const lang = seg.dataset.lang;
+                if (!lang || lang === currentLanguage) return;
+                
+                langSegments.forEach(s => s.classList.remove('active'));
+                seg.classList.add('active');
+                currentLanguage = lang;
+                
+                // Update instruction text based on language
+                const instructions = {
+                    'en': 'Tap mic to start',
+                    'es': 'Toca el mic para empezar',
+                    'fr': 'Appuyez sur le micro',
+                    'de': 'Tippen Sie auf das Mikrofon',
+                    'zh': '点击麦克风开始',
+                    'ja': 'マイクをタップ',
+                    'hi': 'माइक टैप करें'
+                };
+                instructionText.textContent = instructions[lang] || instructions['en'];
+            });
+        });
+
+        // Model Selector
+        modelSegments.forEach(seg => {
+            seg.addEventListener('click', async () => {
+                const model = seg.dataset.model;
+                if (!model || model === currentModel) return;
+                
+                modelSegments.forEach(s => s.classList.remove('active'));
+                seg.classList.add('active');
+                
+                statusText.textContent = 'Switching...';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#ff9f0a] rounded-full';
+                
+                try {
+                    const res = await fetch('/api/model', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ model_type: model })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        currentModel = model;
+                        statusText.textContent = 'Ready';
+                        statusDot.className = 'w-1.5 h-1.5 bg-[#30d158] rounded-full';
+                    } else {
+                        modelSegments.forEach(s => s.classList.remove('active'));
+                        document.querySelector(`[data-model="${currentModel}"]`)?.classList.add('active');
+                        statusText.textContent = 'Failed';
+                        statusDot.className = 'w-1.5 h-1.5 bg-[#ff3b30] rounded-full';
+                    }
+                } catch (e) {
+                    statusDot.className = 'w-1.5 h-1.5 bg-[#ff3b30] rounded-full';
+                }
+            });
+        });
+
+        // Init
+        async function checkStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                if (data.llm_enabled) document.getElementById('llm-badge').classList.remove('hidden');
+                if (data.current_model) {
+                    currentModel = data.current_model;
+                    modelSegments.forEach(s => s.classList.remove('active'));
+                    document.querySelector(`[data-model="${currentModel}"]`)?.classList.add('active');
+                }
+                if (!data.model_loaded) {
+                    statusText.textContent = 'No model';
+                    statusDot.className = 'w-1.5 h-1.5 bg-[#ff9f0a] rounded-full';
+                }
+            } catch (e) {
+                statusText.textContent = 'Offline';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#ff3b30] rounded-full';
+            }
+        }
+        checkStatus();
+
+        // Recording
+        recordBtn.addEventListener('click', () => {
+            if (isRecording) {
+                currentMode === 'stream' ? stopStreaming() : stopRecording();
+            } else {
+                currentMode === 'stream' ? startStreaming() : startRecording();
+            }
+        });
+
+        // === SINGLE MODE ===
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                
+                mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    await analyzeAudio(new Blob(audioChunks, { type: 'audio/wav' }));
+                    stream.getTracks().forEach(t => t.stop());
+                };
+                
+                mediaRecorder.start();
+                isRecording = true;
+                
+                recordBtn.classList.add('recording-active');
+                recordIcon.classList.replace('fa-microphone', 'fa-stop');
+                statusText.textContent = 'Recording';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#ff3b30] rounded-full';
+                instructionText.textContent = 'Tap to stop';
+            } catch (e) {
+                alert('Microphone access required');
+            }
+        }
+
+        function stopRecording() {
+            if (!mediaRecorder || !isRecording) return;
+            mediaRecorder.stop();
+            isRecording = false;
+            
+            recordBtn.classList.remove('recording-active');
+            recordIcon.classList.replace('fa-stop', 'fa-microphone');
+            statusText.textContent = 'Analyzing';
+            statusDot.className = 'w-1.5 h-1.5 bg-[#ff9f0a] rounded-full';
+            instructionText.textContent = 'Processing...';
+        }
+
+        async function analyzeAudio(blob) {
+            const form = new FormData();
+            form.append('audio', blob, 'recording.wav');
+            form.append('language', currentLanguage);
+            
+            try {
+                const res = await fetch('/api/analyze', { method: 'POST', body: form });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                
+                displayResults(data);
+                addToHistory(data);
+                
+                statusText.textContent = 'Ready';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#30d158] rounded-full';
+                
+                // Localized ready text
+                const readyTexts = {
+                    'en': 'Tap mic to start', 'es': 'Toca el mic para empezar',
+                    'fr': 'Appuyez sur le micro', 'de': 'Tippen Sie auf das Mikrofon',
+                    'zh': '点击麦克风开始', 'ja': 'マイクをタップ', 'hi': 'माइक टैप करें'
+                };
+                instructionText.textContent = readyTexts[currentLanguage] || readyTexts['en'];
+            } catch (e) {
+                statusText.textContent = 'Error';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#ff3b30] rounded-full';
+                instructionText.textContent = 'Try again';
+            }
+        }
+
+        // === STREAMING MODE ===
+        async function startStreaming() {
+            try {
+                initSocket();
+                
+                // Reset stats
+                trendData = [];
+                emotionCounts = {};
+                totalConfidence = 0;
+                detectionCount = 0;
+                
+                mediaStream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { sampleRate: 16000, channelCount: 1 } 
+                });
+                
+                audioContext = new AudioContext({ sampleRate: 16000 });
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                audioProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+                
+                audioProcessor.onaudioprocess = (e) => {
+                    if (!isRecording) return;
+                    const inputData = e.inputBuffer.getChannelData(0);
+                    const int16Data = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        int16Data[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+                    }
+                    const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Data.buffer)));
+                    socket.emit('audio_chunk', { audio: base64, sample_rate: 16000 });
+                };
+                
+                source.connect(audioProcessor);
+                audioProcessor.connect(audioContext.destination);
+                
+                isRecording = true;
+                
+                recordBtn.classList.add('recording-active');
+                recordIcon.classList.replace('fa-microphone', 'fa-stop');
+                statusText.textContent = 'Live';
+                statusDot.className = 'w-1.5 h-1.5 bg-[#ff3b30] rounded-full';
+                instructionText.textContent = 'Tap to stop';
+                liveIndicator.classList.remove('hidden');
+                trendSection.classList.remove('hidden');
+                breakdownSection.classList.add('hidden');
+                statsSection.classList.add('hidden');
+                
+            } catch (e) {
+                console.error('Streaming error:', e);
+                alert('Microphone access required');
+            }
+        }
+
+        function stopStreaming() {
+            isRecording = false;
+            
+            if (audioProcessor) { audioProcessor.disconnect(); audioProcessor = null; }
+            if (audioContext) { audioContext.close(); audioContext = null; }
+            if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
+            
+            if (socket) socket.emit('stop_streaming');
+            
+            recordBtn.classList.remove('recording-active');
+            recordIcon.classList.replace('fa-stop', 'fa-microphone');
+            statusText.textContent = 'Done';
+            statusDot.className = 'w-1.5 h-1.5 bg-[#ff9f0a] rounded-full';
+            instructionText.textContent = 'Tap mic for live analysis';
+            liveIndicator.classList.add('hidden');
+        }
+
+        // === VISUALIZATION FUNCTIONS ===
+        function updateTrendChart() {
+            if (trendData.length < 2) return;
+            
+            const svg = document.getElementById('trend-svg');
+            const width = svg.clientWidth || 400;
+            const height = 120;
+            const padding = 10;
+            
+            const points = trendData.map((d, i) => {
+                const x = padding + (i / (trendData.length - 1)) * (width - padding * 2);
+                const y = height - padding - (emotionValues[d.emotion] || 0.5) * (height - padding * 2);
+                return { x, y, emotion: d.emotion };
+            });
+            
+            // Create smooth curve
+            const lineD = points.map((p, i) => (i === 0 ? `M ${p.x},${p.y}` : `L ${p.x},${p.y}`)).join(' ');
+            const areaD = lineD + ` L ${points[points.length-1].x},${height} L ${points[0].x},${height} Z`;
+            
+            document.getElementById('trend-line').setAttribute('d', lineD);
+            document.getElementById('trend-area').setAttribute('d', areaD);
+            
+            // Update dot position
+            const lastPoint = points[points.length - 1];
+            const dot = document.getElementById('trend-dot');
+            dot.setAttribute('cx', lastPoint.x);
+            dot.setAttribute('cy', lastPoint.y);
+            dot.style.display = 'block';
+            dot.style.fill = emotionColors[lastPoint.emotion] || '#0a84ff';
+        }
+
+        function showStreamingSummary(data) {
+            // Show breakdown
+            breakdownSection.classList.remove('hidden');
+            const breakdownBars = document.getElementById('breakdown-bars');
+            const total = Object.values(emotionCounts).reduce((a, b) => a + b, 0);
+            
+            const sorted = Object.entries(emotionCounts).sort((a, b) => b[1] - a[1]);
+            breakdownBars.innerHTML = sorted.map(([emotion, count]) => {
+                const pct = (count / total * 100).toFixed(0);
+                const color = emotionColors[emotion] || '#8e8e93';
+                return `
+                    <div class="flex items-center gap-3">
+                        <span class="text-xl w-8">${emotionEmojis[emotion] || '😐'}</span>
+                        <div class="flex-1">
+                            <div class="flex justify-between text-[12px] mb-1">
+                                <span class="text-white/80 capitalize">${emotion}</span>
+                                <span class="text-[#8e8e93]">${pct}%</span>
+                            </div>
+                            <div class="emotion-bar">
+                                <div class="emotion-bar-fill" style="width: ${pct}%; background: ${color};"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            // Show stats
+            statsSection.classList.remove('hidden');
+            const avgConf = detectionCount > 0 ? (totalConfidence / detectionCount * 100) : 0;
+            
+            document.getElementById('stat-confidence').textContent = `${avgConf.toFixed(0)}%`;
+            document.getElementById('stat-detections').textContent = detectionCount;
+            document.getElementById('stat-dominant').textContent = emotionEmojis[data.dominant_emotion] || '😐';
+            
+            // Animate rings
+            const circumference = 163.36;
+            document.getElementById('stat-confidence-ring').style.strokeDashoffset = circumference * (1 - avgConf / 100);
+            document.getElementById('stat-detections-ring').style.strokeDashoffset = circumference * (1 - Math.min(detectionCount / 20, 1));
+            document.getElementById('stat-dominant-ring').style.strokeDashoffset = circumference * 0.15;
+        }
+
+        function updateEmotionDisplay(emotion, confidence) {
+            const conf = (confidence || 0) * 100;
+            document.getElementById('emotion-icon').textContent = emotionEmojis[emotion] || '😐';
+            document.getElementById('emotion-label').textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+            document.getElementById('confidence-text').textContent = `${conf.toFixed(0)}%`;
+            document.getElementById('confidence-text').classList.remove('hidden');
+            
+            // Update ring color
+            const ringBg = document.getElementById('emotion-ring-bg');
+            const color = emotionColors[emotion] || '#8e8e93';
+            ringBg.style.background = `conic-gradient(from 0deg, ${color}40 0deg, ${color}20 180deg, ${color}40 360deg)`;
+        }
+
+        function displayResults(data) {
+            const emotion = data.emotion || 'neutral';
+            const confidence = (data.confidence || 0) * 100;
+            
+            updateEmotionDisplay(emotion, data.confidence);
+            
+            document.getElementById('transcription').textContent = `"${data.transcription || 'Could not transcribe'}"`;
+            document.getElementById('response').textContent = data.response || "I'm here to help!";
+            
+            if (data.llm_enabled) document.getElementById('llm-indicator').classList.remove('hidden');
+            else document.getElementById('llm-indicator').classList.add('hidden');
+            
+            resultsDiv.classList.remove('hidden');
+            
+            if ('speechSynthesis' in window) {
+                const u = new SpeechSynthesisUtterance(data.response);
+                u.rate = 0.95;
+                speechSynthesis.speak(u);
+            }
+        }
+
+        function addToHistory(data) {
+            emotionHistory.unshift({ 
+                emotion: data.emotion, 
+                confidence: data.confidence,
+                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+                timestamp: new Date().toISOString()
+            });
+            emotionHistory = emotionHistory.slice(0, 20);
+            
+            document.getElementById('history-section').classList.remove('hidden');
+            document.getElementById('history-container').innerHTML = emotionHistory.map((h, i) => `
+                <div class="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-xl ${i === 0 ? 'bg-[#0a84ff]/15' : 'bg-[#1c1c1e]'}">
+                    <span class="text-lg">${emotionEmojis[h.emotion] || '😐'}</span>
+                    <div class="text-left">
+                        <p class="text-[12px] text-white/80 capitalize">${h.emotion}</p>
+                        <p class="text-[10px] text-[#636366]">${h.time}</p>
+                    </div>
+                </div>
+            `).join('');
+            
+            // Show download button if we have enough history
+            if (emotionHistory.length >= 3) {
+                document.getElementById('download-report-btn').classList.remove('hidden');
+            }
+        }
+
+        // Download Report
+        document.getElementById('download-report-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('download-report-btn');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating...';
+            btn.disabled = true;
+            
+            try {
+                // Calculate emotion breakdown
+                const breakdown = {};
+                let totalConf = 0;
+                emotionHistory.forEach(h => {
+                    breakdown[h.emotion] = (breakdown[h.emotion] || 0) + 1;
+                    totalConf += h.confidence || 0.5;
+                });
+                
+                // Find dominant emotion
+                const dominant = Object.entries(breakdown).sort((a, b) => b[1] - a[1])[0]?.[0] || 'neutral';
+                const avgConf = emotionHistory.length > 0 ? totalConf / emotionHistory.length : 0.5;
+                
+                const reportData = {
+                    emotions: emotionHistory.map(h => ({
+                        emotion: h.emotion,
+                        confidence: h.confidence || 0.5,
+                        timestamp: h.timestamp
+                    })),
+                    dominant_emotion: dominant,
+                    average_confidence: avgConf,
+                    emotion_breakdown: breakdown,
+                    model_used: currentModel,
+                    language: currentLanguage
+                };
+                
+                const response = await fetch('/api/report', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(reportData)
+                });
+                
+                if (!response.ok) throw new Error('Failed to generate report');
+                
+                // Download the PDF
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `emotion_report_${new Date().toISOString().slice(0,10)}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                
+                btn.innerHTML = '<i class="fas fa-check"></i> Downloaded!';
+                setTimeout(() => { btn.innerHTML = originalText; }, 2000);
+                
+            } catch (e) {
+                console.error('Report error:', e);
+                btn.innerHTML = '<i class="fas fa-times"></i> Error';
+                setTimeout(() => { btn.innerHTML = originalText; }, 2000);
+            }
+            
+            btn.disabled = false;
+        });
+    </script>
+</body>
+</html>
